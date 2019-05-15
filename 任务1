@@ -1,0 +1,94 @@
+#include <iostream>
+#include <string>
+using namespace std;
+
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/features2d/features2d.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+using namespace cv;
+
+
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_types.h>
+#include <pcl/visualization/cloud_viewer.h>
+
+typedef pcl::PointXYZRGBA PointT;
+typedef pcl::PointCloud<PointT> PointCloud;
+
+
+const double camera_factor = 1000;
+const double camera_cx = 319.500000;
+const double camera_cy = 239.500000;
+const double camera_fx = 571.623718;
+const double camera_fy = 571.623718;
+
+void depth2pcolor(Mat & pcolor, const Mat & depth, int pcolortype = 2) {
+	double max = 0, min = 0;
+	int cols = depth.cols;
+	int rows = depth.rows;
+	for (int i = 0; i < rows; i++) {
+		for (int j = 0; j < cols; j++) {
+			ushort d = depth.at<ushort>(i, j);
+			if (d <= min && d != 0) {
+				min = d;
+			}
+			if (d >= max) {
+				max = d;
+			}
+		}
+	}
+
+	double alpha = 255.0 / (max - min);
+	Mat grayImage;
+	depth.convertTo(grayImage, CV_8UC1, alpha, -alpha * min);
+	applyColorMap(grayImage, pcolor, pcolortype);
+}
+
+int main(int argc, char ** argv) {
+	Mat rgb, depth, prgb;
+	rgb = imread("color0.jpg");
+	depth = imread("depth0.pgm", IMREAD_UNCHANGED);
+	resize(rgb, rgb, depth.size());
+	depth2pcolor(prgb, depth, 2);
+
+
+	Mat test;
+	PointCloud::Ptr cloud(new PointCloud);
+
+	int sum = 0;
+	for (int m = 0; m < depth.rows; m++)
+		for (int n = 0; n < depth.cols; n++) {
+			ushort d = depth.ptr<ushort>(m)[n];
+			if (d == 0)
+				continue;
+			PointT p;
+			p.z = double(d) / camera_factor;
+			p.x = (n - camera_cx) * p.z / camera_fx;
+			p.y = (m - camera_cy) * p.z / camera_fy;
+			p.b = rgb.ptr<uchar>(m)[n * 3];
+			p.g = rgb.ptr<uchar>(m)[n * 3 + 1];
+			p.r = rgb.ptr<uchar>(m)[n * 3 + 2];
+
+			cloud->points.push_back(p);
+
+		}
+
+	cloud->height = 1;
+	cloud->width = cloud->points.size();
+	cout << "point cloud size = " << cloud->points.size() << endl;
+	cloud->is_dense = true;
+
+	pcl::visualization::PCLVisualizer viewer("Cloud Viewer");
+	viewer.addPointCloud(cloud);
+	
+	pcl::io::savePCDFile("nice.pcd", *cloud);
+	cloud->points.clear();
+	cout << "Point cloud saved" << endl;
+	imshow("prgb", prgb);
+	imshow("rgb", rgb);
+	imshow("depth", depth);
+
+	waitKey(0);
+	return 0;
+}
